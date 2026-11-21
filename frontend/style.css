@@ -5,3 +5,14 @@
 textarea{font:inherit;width:100%;padding:10px;background:oklch(97% .015 85);border:1px solid var(--line);color:var(--ink);resize:vertical}.inline-form{display:flex;gap:12px;margin:20px 0}.inline-form select{flex:1}.inline-form button{white-space:nowrap}.checkin{display:flex;gap:8px;align-items:center}.checkin input{width:200px;font-size:12px}.checkin button{font-size:11px;white-space:nowrap}.staff-directory{max-height:370px;overflow:auto;border-top:1px solid var(--line);margin-top:20px}.staff-line{display:flex;align-items:center;justify-content:space-between;padding:12px 0;border-bottom:1px solid var(--line);font-size:12px}.staff-line small{display:block;font-size:10px}.staff-line button{font-size:10px;padding:5px 9px}.handover{padding:20px 0;border-bottom:1px solid var(--line)}.handover p{font-size:13px;line-height:1.9}.handover .strip{margin:16px 0}@media(max-width:800px){.inline-form,.checkin{display:block}.inline-form button,.checkin button{margin-top:10px}.checkin input{width:100%}}
 
 .nav{gap:25px;flex-wrap:wrap}.nav a{white-space:nowrap}.pagehead select{letter-spacing:0}@media(max-width:800px){.nav{flex-wrap:nowrap}}
+
+/* 开放座数 / 删失需求 */
+.basis{display:block;font-size:10px;line-height:1.7;margin:5px 0;padding:3px 6px;border-left:2px solid var(--gold);background:var(--soft)}
+.basis.fullhouse{border-left-color:var(--wine);font-weight:600}
+.basis-tag{font-size:10px;padding:2px 6px;border:1px solid var(--line);white-space:nowrap}
+.basis-tag.full_house{background:oklch(85% .05 135);border-color:oklch(65% .06 135)}
+.basis-tag.capacity_capped{background:oklch(88% .065 80)}
+.basis-missing{color:var(--wine);font-size:10px;border:1px dashed var(--wine);padding:1px 5px}
+.panelnote.warn{border-left-color:var(--wine);background:oklch(90% .05 30);padding:12px 14px}
+.checkline{display:flex;align-items:center;gap:8px;font-size:12px;margin:12px 0}
+.checkline input{width:auto}

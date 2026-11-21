@@ -16,19 +16,31 @@ def seed():
         for role in ('admin','steward','viewer'):
             email=role+'@nanan.demo'
             if not s.scalar(select(User).where(User.email==email)):s.add(User(email=email,role=role,password_hash=hash_password('Curtain2026!')))
-        for code,title in [('NA-TIDE','潮汐独白'),('NA-GAP','排练厅缺口示例')]:
+        for code,title in [('NA-TIDE','潮汐独白'),('NA-GAP','排练厅缺口示例'),('NA-LEGACY','旧数据升级示例')]:
             if not s.scalar(select(Production).where(Production.code==code)):s.add(Production(code=code,title=title,seats=160,duration_minutes=95))
-        s.flush();p=s.scalar(select(Production).where(Production.code=='NA-TIDE'));gap=s.scalar(select(Production).where(Production.code=='NA-GAP'))
+        s.flush();p=s.scalar(select(Production).where(Production.code=='NA-TIDE'));gap=s.scalar(select(Production).where(Production.code=='NA-GAP'));legacy=s.scalar(select(Production).where(Production.code=='NA-LEGACY'))
         rng=random.Random(42);start=date(2026,9,22)
+        # NA-TIDE moves from the 120-seat small hall to the 160-seat main hall.
+        # Weekend demand outgrew the small hall, so those shows sold out and their
+        # arrivals are only a demand floor, not the demand itself. Every show
+        # records the seats actually opened; sold-out rows are capped there.
         for i in range(63):
             d=start+timedelta(days=i)
             if s.scalar(select(Performance).where(Performance.production_id==p.id,Performance.date==d)):continue
+            opened=120 if i<56 else None
             n=round(75+i*.38+[0,-5,0,5,20,52,40][d.weekday()]+rng.uniform(-4,4)) if i<56 else None
-            s.add(Performance(production_id=p.id,date=d,curtain='19:30',arrivals=n,status='observed' if n is not None else 'scheduled'))
+            if n is not None:n=min(n,opened)
+            s.add(Performance(production_id=p.id,date=d,curtain='19:30',open_seats=opened,arrivals=n,status='observed' if n is not None else 'scheduled'))
         for i in range(29):
             if i==10:continue
             d=date(2026,10,19)+timedelta(days=i)
-            if not s.scalar(select(Performance).where(Performance.production_id==gap.id,Performance.date==d)):s.add(Performance(production_id=gap.id,date=d,curtain='19:30',arrivals=80+i%7,status='observed'))
+            if not s.scalar(select(Performance).where(Performance.production_id==gap.id,Performance.date==d)):s.add(Performance(production_id=gap.id,date=d,curtain='19:30',open_seats=160,arrivals=80+i%7,status='observed'))
+        # Simulates a catalogue upgraded from before open seats were recorded:
+        # every row is pre-upgrade, so open_seats stays NULL and is listed for
+        # correction rather than back-filled from the 160-seat venue.
+        for i in range(35):
+            d=date(2026,10,1)+timedelta(days=i)
+            if not s.scalar(select(Performance).where(Performance.production_id==legacy.id,Performance.date==d)):s.add(Performance(production_id=legacy.id,date=d,curtain='19:30',open_seats=None,arrivals=70+i%9,status='observed'))
         for i,name in enumerate(['林澈','周芮','许舟','陈言','方亭','江沅','沈青','唐禾','魏宁','宋乔','陆遥','朱青','李荷','钱霖','赵岳','顾川'],1):
             code=f'ST-{i:02d}'
             if not s.scalar(select(StaffMember).where(StaffMember.code==code)):s.add(StaffMember(code=code,name=name,active=True,max_daily_calls=1 if i==3 else 3))

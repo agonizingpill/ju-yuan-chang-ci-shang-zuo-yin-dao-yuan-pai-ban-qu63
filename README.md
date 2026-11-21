@@ -7,8 +7,8 @@
 ## 业务模块
 
 - 演出日历：Production剧目与Performance场次关联，每剧目每天一场；剧目有座位容量与演出时长。
-- 验票历史：按日补录/修订真实范围的观众人数，不能超过座位；日期缺口阻止预测。
-- 上座预测：Python worker执行Holt-Winters周季节预测；更早49天训练、最近7天回测，再用56天预测下一周；页面展示回测误差、原始需求、座位封顶值和所需引导员。
+- 验票历史：按日补录/修订真实范围的观众人数与该场实际开放座数，人数不能超过开放座数；日期缺口阻止预测。满座只说明需求至少这么多，开放座数记下后才不会把售罄当成真实需求。
+- 上座预测：Python worker执行Holt-Winters周季节预测；更早49天训练、最近7天回测，再用56天预测下一周；满座验票按右删失处理（用截断正态期望抬高为需求下限）；页面分别展示非满座误差与满座时至少低估、原始需求、座位封顶值和所需引导员。某星期几没有非满座样本时，该星期几按新场地满座备人并注明依据。
 - 实名到岗：已确认点名分配StaffMember到CrewAssignment，保留姓名编号快照；跨剧目占用时段重叠、停用或超个人每日上限拒配；现场到岗限点名时刻前后15分钟，登记后不可重复。
 - 散场交接：实名签到人数达到已确认配置才能保存ShowDebrief；实到人数不得超座位；散场>15分钟或上座偏差>30%须至少8字原因；领班可修订草稿，经理归档后冻结。
 - 场务点名：每40位预计观众至少1名引导员，向上取整，最少1名；点名须在开场前30分钟至6小时内；经理确认时检查人手与有效预测。成功确认关联场次状态。
@@ -35,19 +35,24 @@ docker compose exec -T backend python -m scripts.seed_demo
 ## 一天的工作剧本
 
 1. 08:30 经理查看NA-TIDE《潮汐独白》，160席、95分钟，19:30开场。
-2. 09:00 票务核对2026-09-22至11-16共56天验票，0观众也应记录，不能漏日。
-3. 09:30 在验票历史校正人数；新输入会使旧预测和待确认点名失效。
-4. 10:00 领班预测11-17至11-23上座，检查最近7日回测误差与周末需求。
+2. 09:00 票务核对2026-09-22至11-16共56天验票，0观众也应记录，不能漏日；同时为每场记下当时实际开放座数（此前小厅开放120席）。
+3. 09:30 在验票历史校正人数与开放座数；新输入会使旧预测和待确认点名失效。若某场满座，只当需求下限，不照搬验票数给大场地排人。
+4. 10:00 领班预测11-17至11-23上座，分别查看非满座误差与满座至少低估；周六历史上只有满座样本，页面注明按新场地160席满座备人。
 5. 10:30 为11-17场次安排18:45点名；预计人数每40人需要1名引导员。
 6. 11:00 演练1名引导员的不足草案，经理确认被拒，补足4名后再确认。
-7. 14:00 经理确认点名，Performance由forecasted变成crew_confirmed，CrewCall变confirmed。
-8. 16:00 观察员查看已确认点名；历史输入已冻结。切到“排练厅缺口示例”演练缺日拒绝。
+7. 13:00 若发现11-16的开放座数记错，先在验票历史更正；经理的点名确认会等补正后的估值发布再通过。
+8. 14:00 经理确认点名，Performance由forecasted变成crew_confirmed，CrewCall变confirmed。
+9. 16:00 观察员查看已确认点名；历史输入已冻结。切到“排练厅缺口示例”演练缺日拒绝，切到“旧数据升级示例”演练缺座数单列、须补录而不能倒填。
 
 ## 算法与可复现口径
 
-输入是至少28天连续逐日验票序列。没有随机拆分：最后7天只做验证，前面的记录拟合statsmodels ExponentialSmoothing(trend=add,seasonal=add,seasonal_periods=7)；MAE=mean(abs(actual-predicted))。随后完整历史重拟合预测未来7天。原始需求=max(0,predicted)；排班人数基数=min(seats,ceil(raw))；所需引导员=max(1,ceil(base/40))。无随机拟合步骤，seed仅用于生成可复现模拟历史。参考数据是业务模拟，不代表真实剧院。
+输入是至少28天连续逐日验票序列，每场带当时实际开放座数`open_seats`。没有随机拆分：最后7天只做验证，前面的记录拟合statsmodels ExponentialSmoothing(trend=add,seasonal=add,seasonal_periods=7)。满座场（arrivals=open_seats）只证明需求≥开放座数，按右删失处理：用当前拟合与非满座残差标准差，把满座记录替换为截断正态期望E[D|D≥open]、迭代重拟合（`forecast.py:censored_fit`），避免用售罄的上限当真实需求拟合。回测口径分开：非满座场`MAE=mean(|actual-predicted|)`；满座场只算“至少低估”`max(0, open-predicted)`及其均值/上限，二者不混成一个MAE。随后完整历史重拟合预测未来7天。某星期几在可用历史里没有非满座样本时该星期几`full_house`：排班基数直接取新场地座位数并在`forecast_basis`/证据里注明原因；否则原始需求=max(0,predicted)，需求超过新场地座位才`capacity_capped`按满座封顶，排班基数=min(seats,ceil(raw))，所需引导员=max(1,ceil(base/40))。无随机拟合步骤，seed仅用于生成可复现模拟历史。参考数据是业务模拟，不代表真实剧院。
 
-结果写入Production.forecast_evidence、Performance.forecast/raw_forecast与backend/worker共享产物卷。没有前端假预测。缺日、少于28天或已确认点名均阻止建模。
+旧数据升级后`open_seats`为NULL的场次单列（`missing_open_seats`、`/productions/{id}/missing-seats`），绝不按现有座位数倒填；缺座数场次不参与拟合。若缺座数出现在最近验票或造成窗口不连续则阻止预测并列出待补录日期，只有窗口之前的更早旧记录可以保留为未使用历史。
+
+更正开放座数或验票会递增`Production.input_version`并使未确认预测失效。预测作业带着入队时的版本执行，若期间座数被补正，worker不发布旧估值而是按新版本重排；`/crew-calls/{id}/confirm`在证据版本与当前输入版本不一致或预测尚未就绪时返回409，要求等补正后的估值发布再点名。已确认点名的剧目输入仍冻结。
+
+结果写入Production.forecast_evidence、Performance.forecast/raw_forecast/forecast_basis与backend/worker共享产物卷。没有前端假预测。缺日、少于28天、缺开放座数或已确认点名均阻止建模。
 
 ## 工程与本地开发
 
@@ -60,7 +65,17 @@ docker compose exec -T backend python -m scripts.seed_demo
 
 五服务frontend/backend/worker/db/redis均有健康检查；worker写心跳；db/redis健康后启动应用，frontend依赖backend健康。Nginx `/api/` 去除前缀代理。命名卷保存db、redis、共享产物。`.env.example`提供端口、短名、JWT_SECRET、SEED_DEMO与显式可配10.221.25.0/24子网（本机默认地址池不足时使用）。
 
-`backend/src/models.py`三个领域模型和User/Audit；`schemas.py`输入校验；`services.py`日历连续性、失效链、点名条件；`forecast.py`时序拟合；`worker.py`队列；`main.py`路由；`auth.py`JWT与PBKDF2；`middlewares.py`请求ID/限流；`scripts/seed_demo.py`自然键只增不覆盖。
+`backend/src/models.py`三个领域模型和User/Audit；`schemas.py`输入校验；`services.py`日历连续性、失效链、版本一致的点名确认；`forecast.py`删失时序拟合与星期几依据；`worker.py`队列与过期结果丢弃；`migrations.py`旧库加列；`main.py`路由；`auth.py`JWT与PBKDF2；`middlewares.py`请求ID/限流；`scripts/seed_demo.py`自然键只增不覆盖。
+
+开放座数相关接口（三角色可读；`PATCH`需admin/steward）：
+
+|接口|说明|
+|---|---|
+|POST /performances|可带`open_seats`登记该场实际开放座数|
+|PATCH /performances/{id}/history|一次事务校正`arrivals`与`open_seats`（`open_seats`须显式提交，可为null标记缺失）|
+|PATCH /performances/{id}/open-seats|单独补录开放座数，检票人数不得高于座数|
+|PATCH /performances/{id}/arrivals|仅改人数；该场有座数时不得高于开放座数|
+|GET /productions/{id}/missing-seats|单列缺开放座数的历史场次（不参与预测，不倒填）|
 
 前端`src/pages/calendar.js`节目日历、`history.js`验票、`forecast.js`预测、`crew.js`点名；`api.js`客户端、`store.js`状态、`components/shared.js`状态/容量条/日期块跨页复用、`utils/format.js`转义/日期/表单工具。
 
@@ -68,7 +83,7 @@ docker compose exec -T backend python -m scripts.seed_demo
 
 本地设置DATABASE_URL/REDIS_URL，backend目录安装requirements后运行`uvicorn src.main:app --reload`，另开`python -m src.worker`；前端建议使用Compose Nginx代理。停止保留数据`docker compose down`，验收清理`down -v --remove-orphans`。
 
-已知范围：每剧目每日一场，人员占用会跨剧目检查；未接短信、门禁或考勤硬件。时间为本地Asia/Shanghai。已确认后输入冻结，小型版本没有取消确认/滚动下一周结转。worker故障后的可靠重投尚未实现。外部Google字体离线回退。运行证据位于`../../test-artifacts/gb-1025/`。
+已知范围：每剧目每日一场，人员占用会跨剧目检查；未接短信、门禁或考勤硬件。时间为本地Asia/Shanghai。已确认后输入冻结，小型版本没有取消确认/滚动下一周结转。worker故障后的可靠重投尚未实现（删失估计使用截断正态近似，非完整生存模型）。外部Google字体离线回退。运行证据位于`../../test-artifacts/gb-1025/`。
 
 ## 实名到岗与散场交接扩展
 
@@ -86,7 +101,7 @@ docker compose exec -T backend python -m scripts.seed_demo
 |POST /show-debriefs、PUT /show-debriefs/{id}|admin/steward交接草稿与修订|
 |POST /show-debriefs/{id}/archive|仅admin归档|
 
-seed另有16名场务、1名停用示例，以及“交接演练·夜场”11-17/18与“交接演练·午场”11-17的已确认点名（各2人、预期80人）。这些是明确标识的运营交接演练快照，不作为Holt-Winters训练/指标；原NA-TIDE的56天历史与预测流程保持独立。自然键只插缺失数据，重复seed不覆盖人员姓名、签到和归档记录。三张新增表采用create_all建立，原有表没有新增列或历史回填。
+seed另有16名场务、1名停用示例，以及“交接演练·夜场”11-17/18与“交接演练·午场”11-17的已确认点名（各2人、预期80人）。这些是明确标识的运营交接演练快照，不作为Holt-Winters训练/指标；原NA-TIDE的56天历史与预测流程保持独立。NA-TIDE模拟从小厅（每场开放120席）换到大厅的实际场景：周末售罄场记开放座数120且验票等于座数（需求下限），周六在可用历史里没有非满座样本，因此未来周六按新场地160席满座备人。“旧数据升级示例”NA-LEGACY全部35场无开放座数，用于演练升级后单列、须按当时座数补录而不能倒填。自然键只插缺失数据，重复seed不覆盖人员姓名、签到和归档记录。三张新增表采用create_all建立，原有表通过`migrations.py`幂等加列（`open_seats`、`forecast_basis`、`input_version`、`forecast_input_version`），不重写历史值。
 
 新增交接状态在 `backend/src/constants.py` 和 `frontend/src/constants.js` 定义。当前没有请假撤岗、主管追加人手、取消归档或与真实票务对账；原人数配置不足的场次必须先在点名确认前修正。验收证据在 `test-artifacts/gb-1025/expansion/`。
 
